@@ -1,0 +1,90 @@
+---
+title: "ITS"
+author: "陈振"
+date: "2019/11/8"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Rcpp)
+library(dada2)
+library(Biostrings)
+```
+
+```{r function}
+dada2_its <- function(path){
+  path <- path
+  filtpath <- file.path(path, "filtered")
+  fnFs <- sort(list.files(path, pattern = "1.fastq.gz", full.names = TRUE))
+  fnRs <- sort(list.files(path, pattern = "2.fastq.gz", full.names = TRUE))
+  sample.names <- sapply(strsplit(basename(fnFs), "[.]"), "[", 1)
+  # remove primer
+  removeFs <- file.path(path, "remove", paste0(sample.names, ".R1.remove.fastq.gz"))
+  removeRs <- file.path(path, "remove", paste0(sample.names, ".R2.remove.fastq.gz"))
+  # filter
+  filtFs <- file.path(path, "filtered", paste0(sample.names, ".R1.filter.fastq.gz"))
+  filtRs <- file.path(path, "filtered", paste0(sample.names, ".R2.filter.fastq.gz"))
+  
+  # remove_primers_F <- removePrimers(fn = fnFs, fout = removeFs, 
+  #                                  primer.fwd = "GATATGCTTAAGTTCAGCGGGT")
+  
+  # remove_primers_R <- removePrimers(fn = fnRs, fout = removeRs, 
+  #                                  primer.fwd = "GATATGCTTAAGTTCAGCGGGT")
+  
+  out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, maxN = 0, maxEE = c(2, 2), 
+      truncQ = 2, minLen = 50, rm.phix = TRUE, compress = TRUE, multithread = TRUE)
+  errF <- learnErrors(filtFs, multithread = TRUE)
+  errR <- learnErrors(filtRs, multithread = TRUE)
+  derepFs <- derepFastq(filtFs, verbose = TRUE)
+  derepRs <- derepFastq(filtRs, verbose = TRUE)
+  names(derepFs) <- sample.names
+  names(derepRs) <- sample.names
+  dadaFs <- dada(derepFs, err = errF, multithread = TRUE)
+  dadaRs <- dada(derepRs, err = errR, multithread = TRUE)
+  mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE)
+  seqtab <- makeSequenceTable(mergers)
+  seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+  getN <- function(x) sum(getUniques(x))
+  track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, 
+      getN), rowSums(seqtab.nochim))
+  colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", 
+      "nonchim")
+  rownames(track) <- sample.names
+  unite.ref <- "/Users/chenzhen/Desktop/DADA2/unites/tax/sh_general_release_dynamic_02.02.2019.fasta"
+  taxa <- assignTaxonomy(seqtab.nochim, unite.ref, multithread = TRUE, tryRC = TRUE)
+  # taxa <- addSpecies(taxa, unite.ref)
+  taxa.print <- taxa
+  rownames(taxa.print) <- NULL
+  seqtab.nochim.t <- t(seqtab.nochim)
+  rownames(seqtab.nochim.t) <- NULL
+  otu.table <- cbind(seqtab.nochim.t, taxa.print)
+  return(otu.table)
+}
+```
+
+```{r change name}
+path <- "/Users/chenzhen/Desktop/肺泡灌洗液/ITS/88_samples_reads"
+setwd(path)
+fnFs <- sort(list.files(pattern = "R1.fastq.gz"))
+fnRs <- sort(list.files(pattern = "R2.fastq.gz"))
+fnFs.samples <- sapply(strsplit(fnFs, "-"), "[", 2)
+sample.names <- sapply(strsplit(fnFs.samples, "_"), "[", 1)
+fnFs.new.name <- paste0(sample.names, ".R1.fastq.gz")
+fnRs.new.name <- paste0(sample.names, ".R2.fastq.gz")
+file.rename(fnFs, fnFs.new.name)
+file.rename(fnRs, fnRs.new.name)
+```
+
+```{r dada2}
+path <- "/Users/chenzhen/Desktop/DADA2/ITS/88_samples_reads"
+otu.table <- dada2_its(path)
+write.table(otu.table, file = "/Users/chenzhen/Desktop/DADA2/all.out", 
+            quote = F, row.names = F,sep = "\t")
+# path <- "/Users/chenzhen/Desktop/DADA2/tmp"
+# tmp.table <- dada2_its(path)
+```
+
+```{r save}
+save.image("/Users/chenzhen/Desktop/DADA2/.RData")
+```
